@@ -1,43 +1,41 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2013 Huang Xin
+# See LICENSE.TXT that came with this file.
 
-# See also: http://sundararajana.blogspot.com/2007/05/motion-detection-using-opencv.html
-
-import cv
-import time
-
-from scipy import *
-from scipy.cluster import vq
-import numpy
-import sys, os, random, hashlib
-
-from math import *
+# originally developed by Derek Simkowiak at http://derek.simkowiak.net/motion-tracking-with-python/
+# See also: http://sundararajana.blogspot.com/2007/05/motion-detection-using-opencv2.html
 
 """
+
 Python Motion Tracker
 
 Reads an incoming video stream and tracks motion in real time.
 Detected motion events are logged to a text file.  Also has face detection.
-"""
 
-#
+"""
+from __future__ import division
+import sys, os, time, random, hashlib
+import numpy as np
+import cv2
+
+from math import *
+from scipy import *
+from scipy.cluster import vq
+
 # BBoxes must be in the format:
 # ( (topleft_x), (topleft_y) ), ( (bottomright_x), (bottomright_y) ) )
-top = 0
-bottom = 1
-left = 0
-right = 1
+top, bottom, left, right = 0, 1, 0, 1
 
-def merge_collided_bboxes( bbox_list ):
+def merge_collided_bboxes(bbox_list):
 	# For every bbox...
 	for this_bbox in bbox_list:
-		
 		# Collision detect every other bbox:
 		for other_bbox in bbox_list:
 			if this_bbox is other_bbox: continue  # Skip self
-			
 			# Assume a collision to start out with:
 			has_collision = True
-			
 			# These coords are in screen coords, so > means 
 			# "lower than" and "further right than".  And < 
 			# means "higher than" and "further left than".
@@ -53,40 +51,36 @@ def merge_collided_bboxes( bbox_list ):
 			
 			if has_collision:
 				# merge these two bboxes into one, then start over:
-				top_left_x = min( this_bbox[left][0], other_bbox[left][0] )
-				top_left_y = min( this_bbox[left][1], other_bbox[left][1] )
-				bottom_right_x = max( this_bbox[right][0], other_bbox[right][0] )
-				bottom_right_y = max( this_bbox[right][1], other_bbox[right][1] )
+				top_left_x = min(this_bbox[left][0], other_bbox[left][0])
+				top_left_y = min(this_bbox[left][1], other_bbox[left][1])
+				bottom_right_x = max(this_bbox[right][0], other_bbox[right][0])
+				bottom_right_y = max(this_bbox[right][1], other_bbox[right][1])
 				
-				new_bbox = ( (top_left_x, top_left_y), (bottom_right_x, bottom_right_y) )
+				new_bbox = ((top_left_x, top_left_y), (bottom_right_x, bottom_right_y))
 				
-				bbox_list.remove( this_bbox )
-				bbox_list.remove( other_bbox )
-				bbox_list.append( new_bbox )
+				bbox_list.remove(this_bbox)
+				bbox_list.remove(other_bbox)
+				bbox_list.append(new_bbox)
 				
 				# Start over with the new list:
-				return merge_collided_bboxes( bbox_list )
+				return merge_collided_bboxes(bbox_list)
 	
 	# When there are no collions between boxes, return that list:
 	return bbox_list
 
 
-def detect_faces( image, haar_cascade, mem_storage ):
-
+def detect_faces(image, haar_cascade):
 	faces = []
-	image_size = cv.GetSize( image )
+	image_h, image_w, _ = image.shape
 
-	#faces = cv.HaarDetectObjects(grayscale, haar_cascade, storage, 1.2, 2, cv.CV_HAAR_DO_CANNY_PRUNING, (20, 20) )
-	#faces = cv.HaarDetectObjects(image, haar_cascade, storage, 1.2, 2, cv.CV_HAAR_DO_CANNY_PRUNING )
-	#faces = cv.HaarDetectObjects(image, haar_cascade, storage )
-	#faces = cv.HaarDetectObjects(image, haar_cascade, mem_storage, 1.2, 2, cv.CV_HAAR_DO_CANNY_PRUNING, ( 16, 16 ) )
-	#faces = cv.HaarDetectObjects(image, haar_cascade, mem_storage, 1.2, 2, cv.CV_HAAR_DO_CANNY_PRUNING, ( 4,4 ) )
-	faces = cv.HaarDetectObjects(image, haar_cascade, mem_storage, 1.2, 2, cv.CV_HAAR_DO_CANNY_PRUNING, ( image_size[0]/10, image_size[1]/10) )
-	
-	for face in faces:
-		box = face[0]
-		cv.Rectangle(image, ( box[0], box[1] ),
-			( box[0] + box[2], box[1] + box[3]), cv.RGB(255, 0, 0), 1, 8, 0)
+	#faces = cv2.HaarDetectObjects(grayscale, haar_cascade, storage, 1.2, 2, cv2.CV_HAAR_DO_CANNY_PRUNING, (20, 20) )
+	#faces = cv2.HaarDetectObjects(image, haar_cascade, storage, 1.2, 2, cv2.CV_HAAR_DO_CANNY_PRUNING )
+	#faces = cv2.HaarDetectObjects(image, haar_cascade, storage )
+	#faces = cv2.HaarDetectObjects(image, haar_cascade, mem_storage, 1.2, 2, cv2.CV_HAAR_DO_CANNY_PRUNING, ( 16, 16 ) )
+	#faces = cv2.HaarDetectObjects(image, haar_cascade, mem_storage, 1.2, 2, cv2.CV_HAAR_DO_CANNY_PRUNING, ( 4,4 ) )
+	faces = haar_cascade.detectMultiScale(image, 1.2, 2, cv2.CASCADE_SCALE_IMAGE, (image_w/10, image_h/10))
+	for box in faces:
+		cv2.rectangle(image, (box[0], box[1]), (box[0] + box[2], box[1] + box[3]), (255, 0, 0), 1, 8, 0)
 
 
 class Target:
@@ -94,64 +88,57 @@ class Target:
 		
 		if len( sys.argv ) > 1:
 			self.writer = None
-			self.capture = cv.CaptureFromFile( sys.argv[1] )
-			frame = cv.QueryFrame(self.capture)
-			frame_size = cv.GetSize(frame)
+			self.capture = cv2.CaptureFromFile(sys.argv[1])
+			frame = cv2.QueryFrame(self.capture)
+			frame_size = frame.shape
 		else:
 			fps=15
 			is_color = True
 
-			self.capture = cv.CaptureFromCAM(0)
-			#cv.SetCaptureProperty( self.capture, cv.CV_CAP_PROP_FRAME_WIDTH, 640 );
-			#cv.SetCaptureProperty( self.capture, cv.CV_CAP_PROP_FRAME_HEIGHT, 480 );
-			cv.SetCaptureProperty( self.capture, cv.CV_CAP_PROP_FRAME_WIDTH, 320 );
-			cv.SetCaptureProperty( self.capture, cv.CV_CAP_PROP_FRAME_HEIGHT, 240 );
-			frame = cv.QueryFrame(self.capture)
-			frame_size = cv.GetSize(frame)
+			self.capture = cv2.VideoCapture(0)
+			self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+			self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+			ret, frame = self.capture.read()
 			
 			self.writer = None
-			#self.writer = cv.CreateVideoWriter("/dev/shm/test1.mp4", cv.CV_FOURCC('D', 'I', 'V', 'X'), fps, frame_size, is_color )
-			#self.writer = cv.CreateVideoWriter("test2.mpg", cv.CV_FOURCC('P', 'I', 'M', '1'), fps, frame_size, is_color )
-			#self.writer = cv.CreateVideoWriter("test3.mp4", cv.CV_FOURCC('D', 'I', 'V', 'X'), fps, cv.GetSize(frame), is_color )
-			#self.writer = cv.CreateVideoWriter("test4.mpg", cv.CV_FOURCC('P', 'I', 'M', '1'), fps, (320, 240), is_color )
+			#self.writer = cv2.CreateVideoWriter("/dev/shm/test1.mp4", cv2.CV_FOURCC('D', 'I', 'V', 'X'), fps, frame_size, is_color )
+			#self.writer = cv2.CreateVideoWriter("test2.mpg", cv2.CV_FOURCC('P', 'I', 'M', '1'), fps, frame_size, is_color )
+			#self.writer = cv2.CreateVideoWriter("test3.mp4", cv2.CV_FOURCC('D', 'I', 'V', 'X'), fps, cv2.GetSize(frame), is_color )
+			#self.writer = cv2.CreateVideoWriter("test4.mpg", cv2.CV_FOURCC('P', 'I', 'M', '1'), fps, (320, 240), is_color )
 			
 			# These both gave no error message, but saved no file:
-			###self.writer = cv.CreateVideoWriter("test5.h263i", cv.CV_FOURCC('I', '2', '6', '3'), fps, cv.GetSize(frame), is_color )
-			###self.writer = cv.CreateVideoWriter("test6.fli",   cv.CV_FOURCC('F', 'L', 'V', '1'), fps, cv.GetSize(frame), is_color )
+			###self.writer = cv2.CreateVideoWriter("test5.h263i", cv2.CV_FOURCC('I', '2', '6', '3'), fps, cv2.GetSize(frame), is_color )
+			###self.writer = cv2.CreateVideoWriter("test6.fli",   cv2.CV_FOURCC('F', 'L', 'V', '1'), fps, cv2.GetSize(frame), is_color )
 			# Can't play this one:
-			###self.writer = cv.CreateVideoWriter("test7.mp4",   cv.CV_FOURCC('D', 'I', 'V', '3'), fps, cv.GetSize(frame), is_color )
+			###self.writer = cv2.CreateVideoWriter("test7.mp4",   cv2.CV_FOURCC('D', 'I', 'V', '3'), fps, cv2.GetSize(frame), is_color )
 
 		# 320x240 15fpx in DIVX is about 4 gigs per day.
 
-		frame = cv.QueryFrame(self.capture)
-		cv.NamedWindow("Target", 1)
-		#cv.NamedWindow("Target2", 1)
+		ret, frame = self.capture.read()
+		cv2.namedWindow("Target", 1)
+		#cv2.namedWindow("Target2", 1)
 		
-
 	def run(self):
 		# Initialize
 		#log_file_name = "tracker_output.log"
 		#log_file = file( log_file_name, 'a' )
 		
-		frame = cv.QueryFrame( self.capture )
-		frame_size = cv.GetSize( frame )
+		ret, frame = self.capture.read()
+		frame_size = frame.shape
 		
 		# Capture the first frame from webcam for image properties
-		display_image = cv.QueryFrame( self.capture )
+		ret, display_image = self.capture.read()
 		
 		# Greyscale image, thresholded to create the motion mask:
-		grey_image = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_8U, 1 )
+		grey_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2GRAY)
 		
 		# The RunningAvg() function requires a 32-bit or 64-bit image...
-		running_average_image = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_32F, 3 )
+		running_average_image = np.float32(display_image)
 		# ...but the AbsDiff() function requires matching image depths:
-		running_average_in_display_color_depth = cv.CloneImage( display_image )
-		
-		# RAM used by FindContours():
-		mem_storage = cv.CreateMemStorage(0)
-		
+		running_average_in_display_color_depth = display_image.copy()
+				
 		# The difference between the running average and the current frame:
-		difference = cv.CloneImage( display_image )
+		difference = display_image.copy()
 		
 		target_count = 1
 		last_target_count = 1
@@ -165,96 +152,89 @@ class Target:
 		
 		# For toggling display:
 		image_list = [ "camera", "difference", "threshold", "display", "faces" ]
-		image_index = 0   # Index into image_list
+		image_index = 3   # Index into image_list
 	
 	
 		# Prep for text drawing:
-		text_font = cv.InitFont(cv.CV_FONT_HERSHEY_COMPLEX, .5, .5, 0.0, 1, cv.CV_AA )
-		text_coord = ( 5, 15 )
-		text_color = cv.CV_RGB(255,255,255)
+		text_coord = (5, 15)
+		text_color = (255,255,255)
 
 		###############################
 		### Face detection stuff
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_frontalface_default.xml' )
-		haar_cascade = cv.Load( 'haarcascades/haarcascade_frontalface_alt.xml' )
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_frontalface_alt2.xml' )
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_mcs_mouth.xml' )
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_eye.xml' )
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_frontalface_alt_tree.xml' )
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_upperbody.xml' )
-		#haar_cascade = cv.Load( 'haarcascades/haarcascade_profileface.xml' )
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_default.xml')
+		haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_alt.xml')
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_alt2.xml')
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_mcs_mouth.xml')
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_eye.xml')
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_frontalface_alt_tree.xml')
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_upperbody.xml')
+		#haar_cascade = cv2.CascadeClassifier('haarcascades/haarcascade_profileface.xml')
 		
 		# Set this to the max number of targets to look for (passed to k-means):
-		max_targets = 3
+		max_targets = 1
 		
 		while True:
-			
 			# Capture frame from webcam
-			camera_image = cv.QueryFrame( self.capture )
+			ret, camera_image = self.capture.read()
 			
 			frame_count += 1
 			frame_t0 = time.time()
 			
 			# Create an image with interactive feedback:
-			display_image = cv.CloneImage( camera_image )
+			display_image = camera_image.copy()
 			
 			# Create a working "color image" to modify / blur
-			color_image = cv.CloneImage( display_image )
+			color_image = display_image.copy()
 
 			# Smooth to get rid of false positives
-			cv.Smooth( color_image, color_image, cv.CV_GAUSSIAN, 19, 0 )
+			color_image = cv2.GaussianBlur(color_image, (19,19), 0)
 			
 			# Use the Running Average as the static background			
 			# a = 0.020 leaves artifacts lingering way too long.
 			# a = 0.320 works well at 320x240, 15fps.  (1/a is roughly num frames.)
-			cv.RunningAvg( color_image, running_average_image, 0.320, None )
+			cv2.accumulateWeighted(color_image, running_average_image, 0.320)
 			
 			# Convert the scale of the moving average.
-			cv.ConvertScale( running_average_image, running_average_in_display_color_depth, 1.0, 0.0 )
+			running_average_in_display_color_depth = cv2.convertScaleAbs(running_average_image)
 			
 			# Subtract the current frame from the moving average.
-			cv.AbsDiff( color_image, running_average_in_display_color_depth, difference )
+			difference = cv2.absdiff(color_image, running_average_in_display_color_depth)
 			
 			# Convert the image to greyscale.
-			cv.CvtColor( difference, grey_image, cv.CV_RGB2GRAY )
+			grey_image = cv2.cvtColor(difference, cv2.COLOR_RGB2GRAY)
 
 			# Threshold the image to a black and white motion mask:
-			cv.Threshold( grey_image, grey_image, 2, 255, cv.CV_THRESH_BINARY )
+			ret, grey_image = cv2.threshold(grey_image, 2, 255, cv2.THRESH_BINARY)
 			# Smooth and threshold again to eliminate "sparkles"
-			cv.Smooth( grey_image, grey_image, cv.CV_GAUSSIAN, 19, 0 )
-			cv.Threshold( grey_image, grey_image, 240, 255, cv.CV_THRESH_BINARY )
+			grey_image = cv2.GaussianBlur(grey_image, (19,19), 0)
+			ret, grey_image = cv2.threshold(grey_image, 240, 255, cv2.THRESH_BINARY)
 			
-			grey_image_as_array = numpy.asarray( cv.GetMat( grey_image ) )
-			non_black_coords_array = numpy.where( grey_image_as_array > 3 )
-			# Convert from numpy.where()'s two separate lists to one list of (x, y) tuples:
-			non_black_coords_array = zip( non_black_coords_array[1], non_black_coords_array[0] )
+			non_black_coords_array = np.where(grey_image > 3)
+			# Convert from np.where()'s two separate lists to one list of (x, y) tuples:
+			non_black_coords_array = zip(non_black_coords_array[1], non_black_coords_array[0])
 			
 			points = []   # Was using this to hold either pixel coords or polygon coords.
 			bounding_box_list = []
 
 			# Now calculate movements using the white pixels as "motion" data
-			contour = cv.FindContours( grey_image, mem_storage, cv.CV_RETR_CCOMP, cv.CV_CHAIN_APPROX_SIMPLE )
+			_, contours, heirs = cv2.findContours(grey_image.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 			
-			while contour:
+			try:
+				heirs = heirs[0]
+			except:
+				heirs = []
 				
-				bounding_rect = cv.BoundingRect( list(contour) )
-				point1 = ( bounding_rect[0], bounding_rect[1] )
-				point2 = ( bounding_rect[0] + bounding_rect[2], bounding_rect[1] + bounding_rect[3] )
-				
-				bounding_box_list.append( ( point1, point2 ) )
-				polygon_points = cv.ApproxPoly( list(contour), mem_storage, cv.CV_POLY_APPROX_DP )
-				
-				# To track polygon points only (instead of every pixel):
-				#points += list(polygon_points)
-				
-				# Draw the contours:
-				###cv.DrawContours(color_image, contour, cv.CV_RGB(255,0,0), cv.CV_RGB(0,255,0), levels, 3, 0, (0,0) )
-				cv.FillPoly( grey_image, [ list(polygon_points), ], cv.CV_RGB(255,255,255), 0, 0 )
-				cv.PolyLine( display_image, [ polygon_points, ], 0, cv.CV_RGB(255,255,255), 1, 0, 0 )
-				#cv.Rectangle( display_image, point1, point2, cv.CV_RGB(120,120,120), 1)
-
-				contour = contour.h_next()
-			
+			for cnt, heir in zip(contours, heirs):
+				_, _, _, outer_i = heir
+				if outer_i >= 0:
+					continue
+				x, y, w, h = cv2.boundingRect(cnt)
+				point1, point2 = (x, y), (x+w, y+h)
+				bounding_box_list.append((point1, point2))
+				polygon_points = cv2.approxPolyDP(cnt, 3, True)
+				#print polygon_points
+				cv2.fillPoly(grey_image, polygon_points, (255,255,255), 0, 0)
+				cv2.polylines(display_image, polygon_points, 0, (255,255,255), 1, 0, 0)
 			
 			# Find the average size of the bbox (targets), then
 			# remove any tiny bboxes (which are prolly just noise).
@@ -264,12 +244,12 @@ class Target:
 			for box in bounding_box_list:
 				box_width = box[right][0] - box[left][0]
 				box_height = box[bottom][0] - box[top][0]
-				box_areas.append( box_width * box_height )
+				box_areas.append(box_width * box_height)
 				
-				#cv.Rectangle( display_image, box[0], box[1], cv.CV_RGB(255,0,0), 1)
+				#cv2.Rectangle( display_image, box[0], box[1], cv2.CV_RGB(255,0,0), 1)
 			
 			average_box_area = 0.0
-			if len(box_areas): average_box_area = float( sum(box_areas) ) / len(box_areas)
+			if len(box_areas): average_box_area = float(sum(box_areas)) / len(box_areas)
 			
 			trimmed_box_list = []
 			for box in bounding_box_list:
@@ -277,20 +257,20 @@ class Target:
 				box_height = box[bottom][0] - box[top][0]
 				
 				# Only keep the box if it's not a tiny noise box:
-				if (box_width * box_height) > average_box_area*0.1: trimmed_box_list.append( box )
+				if (box_width * box_height) > average_box_area*0.1: trimmed_box_list.append(box)
 			
 			# Draw the trimmed box list:
 			#for box in trimmed_box_list:
-			#	cv.Rectangle( display_image, box[0], box[1], cv.CV_RGB(0,255,0), 2 )
+			#	cv2.Rectangle( display_image, box[0], box[1], cv2.CV_RGB(0,255,0), 2 )
 				
-			bounding_box_list = merge_collided_bboxes( trimmed_box_list )
+			bounding_box_list = merge_collided_bboxes(trimmed_box_list)
 
 			# Draw the merged box list:
 			for box in bounding_box_list:
-				cv.Rectangle( display_image, box[0], box[1], cv.CV_RGB(0,255,0), 1 )
+				cv2.rectangle(display_image, box[0], box[1], (0,255,0), 1)
 			
 			# Here are our estimate points to track, based on merged & trimmed boxes:
-			estimated_target_count = len( bounding_box_list )
+			estimated_target_count = len(bounding_box_list)
 			
 			# Don't allow target "jumps" from few to many or many to few.
 			# Only change the number of targets up to one target per n seconds.
@@ -305,7 +285,7 @@ class Target:
 				last_target_change_t = frame_t0
 			
 			# Clip to the user-supplied maximum:
-			estimated_target_count = min( estimated_target_count, max_targets )
+			estimated_target_count = min(estimated_target_count, max_targets)
 			
 			# The estimated_target_count at this point is the maximum number of targets
 			# we want to look for.  If kmeans decides that one of our candidate
@@ -319,19 +299,19 @@ class Target:
 				
 				# If we have all the "target_count" targets from last frame,
 				# use the previously known targets (for greater accuracy).
-				k_or_guess = max( estimated_target_count, 1 )  # Need at least one target to look for.
+				k_or_guess = max(estimated_target_count, 1)  # Need at least one target to look for.
 				if len(codebook) == estimated_target_count: 
 					k_or_guess = codebook
 				
 				#points = vq.whiten(array( points ))  # Don't do this!  Ruins everything.
-				codebook, distortion = vq.kmeans( array( points ), k_or_guess )
+				codebook, distortion = vq.kmeans(array( points ), k_or_guess)
 				
 				# Convert to tuples (and draw it to screen)
 				for center_point in codebook:
-					center_point = ( int(center_point[0]), int(center_point[1]) )
-					center_points.append( center_point )
-					#cv.Circle(display_image, center_point, 10, cv.CV_RGB(255, 0, 0), 2)
-					#cv.Circle(display_image, center_point, 5, cv.CV_RGB(255, 0, 0), 3)
+					center_point = (int(center_point[0]), int(center_point[1]))
+					center_points.append(center_point)
+					#cv2.circle(display_image, center_point, 10, (255, 0, 0), 2)
+					#cv2.circle(display_image, center_point, 5, (255, 0, 0), 3)
 			
 			# Now we have targets that are NOT computed from bboxes -- just
 			# movement weights (according to kmeans).  If any two targets are
@@ -350,7 +330,7 @@ class Target:
 						center_point[1] < box[bottom][1] and center_point[1] > box[top][1] :
 						
 						# This point is within the box.
-						center_points_in_box.append( center_point )
+						center_points_in_box.append(center_point)
 				
 				# Now see if there are more than one.  If so, merge them.
 				if len( center_points_in_box ) > 1:
@@ -360,33 +340,33 @@ class Target:
 						x_list.append(point[0])
 						y_list.append(point[1])
 					
-					average_x = int( float(sum( x_list )) / len( x_list ) )
-					average_y = int( float(sum( y_list )) / len( y_list ) )
+					average_x = int(float(sum(x_list)) / len(x_list))
+					average_y = int(float(sum(y_list)) / len(y_list))
 					
-					trimmed_center_points.append( (average_x, average_y) )
+					trimmed_center_points.append((average_x, average_y))
 					
 					# Record that they were removed:
 					removed_center_points += center_points_in_box
 					
 				if len( center_points_in_box ) == 1:
-					trimmed_center_points.append( center_points_in_box[0] ) # Just use it.
+					trimmed_center_points.append(center_points_in_box[0]) # Just use it.
 			
 			# If there are any center_points not within a bbox, just use them.
 			# (It's probably a cluster comprised of a bunch of small bboxes.)
 			for center_point in center_points:
 				if (not center_point in trimmed_center_points) and (not center_point in removed_center_points):
-					trimmed_center_points.append( center_point )
+					trimmed_center_points.append(center_point)
 			
 			# Draw what we found:
 			#for center_point in trimmed_center_points:
-			#	center_point = ( int(center_point[0]), int(center_point[1]) )
-			#	cv.Circle(display_image, center_point, 20, cv.CV_RGB(255, 255,255), 1)
-			#	cv.Circle(display_image, center_point, 15, cv.CV_RGB(100, 255, 255), 1)
-			#	cv.Circle(display_image, center_point, 10, cv.CV_RGB(255, 255, 255), 2)
-			#	cv.Circle(display_image, center_point, 5, cv.CV_RGB(100, 255, 255), 3)
+			#	center_point = (int(center_point[0]), int(center_point[1]))
+			#	cv2.circle(display_image, center_point, 20, (255, 255,255), 1)
+			#	cv2.circle(display_image, center_point, 15, (100, 255, 255), 1)
+			#	cv2.circle(display_image, center_point, 10, (255, 255, 255), 2)
+			#	cv2.circle(display_image, center_point, 5, (100, 255, 255), 3)
 			
 			# Determine if there are any new (or lost) targets:
-			actual_target_count = len( trimmed_center_points )
+			actual_target_count = len(trimmed_center_points)
 			last_target_count = actual_target_count
 			
 			# Now build the list of physical entities (objects)
@@ -402,12 +382,12 @@ class Target:
 				
 				for entity in last_frame_entity_list:
 					
-					entity_coords= entity[3]
+					entity_coords = entity[3]
 					delta_x = entity_coords[0] - target[0]
 					delta_y = entity_coords[1] - target[1]
 			
-					distance = sqrt( pow(delta_x,2) + pow( delta_y,2) )
-					entity_distance_dict[ distance ] = entity
+					distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2))
+					entity_distance_dict[distance] = entity
 				
 				# Did we find any non-claimed entities (nearest to furthest):
 				distance_list = entity_distance_dict.keys()
@@ -416,11 +396,11 @@ class Target:
 				for distance in distance_list:
 					
 					# Yes; see if we can claim the nearest one:
-					nearest_possible_entity = entity_distance_dict[ distance ]
+					nearest_possible_entity = entity_distance_dict[distance]
 					
 					# Don't consider entities that are already claimed:
 					if nearest_possible_entity in this_frame_entity_list:
-						#print "Target %s: Skipping the one iwth distance: %d at %s, C:%s" % (target, distance, nearest_possible_entity[3], nearest_possible_entity[1] )
+						#print "Target %s: Skipping the one iwth distance: %d at %s, C:%s" % (target, distance, nearest_possible_entity[3], nearest_possible_entity[1])
 						continue
 					
 					#print "Target %s: USING the one iwth distance: %d at %s, C:%s" % (target, distance, nearest_possible_entity[3] , nearest_possible_entity[1])
@@ -428,19 +408,19 @@ class Target:
 					entity_found = True
 					nearest_possible_entity[2] = frame_t0  # Update last_time_seen
 					nearest_possible_entity[3] = target  # Update the new location
-					this_frame_entity_list.append( nearest_possible_entity )
-					#log_file.write( "%.3f MOVED %s %d %d\n" % ( frame_t0, nearest_possible_entity[0], nearest_possible_entity[3][0], nearest_possible_entity[3][1]  ) )
+					this_frame_entity_list.append(nearest_possible_entity)
+					#log_file.write( "%.3f MOVED %s %d %d\n" % (frame_t0, nearest_possible_entity[0], nearest_possible_entity[3][0], nearest_possible_entity[3][1]))
 					break
 				
 				if entity_found == False:
 					# It's a new entity.
-					color = ( random.randint(0,255), random.randint(0,255), random.randint(0,255) )
-					name = hashlib.md5( str(frame_t0) + str(color) ).hexdigest()[:6]
+					color = (random.randint(0,255), random.randint(0,255), random.randint(0,255))
+					name = hashlib.md5(str(frame_t0) + str(color)).hexdigest()[:6]
 					last_time_seen = frame_t0
 					
-					new_entity = [ name, color, last_time_seen, target ]
-					this_frame_entity_list.append( new_entity )
-					#log_file.write( "%.3f FOUND %s %d %d\n" % ( frame_t0, new_entity[0], new_entity[3][0], new_entity[3][1]  ) )
+					new_entity = [name, color, last_time_seen, target]
+					this_frame_entity_list.append(new_entity)
+					#log_file.write( "%.3f FOUND %s %d %d\n" % (frame_t0, new_entity[0], new_entity[3][0], new_entity[3][1]))
 			
 			# Now "delete" any not-found entities which have expired:
 			entity_ttl = 1.0  # 1 sec.
@@ -453,7 +433,7 @@ class Target:
 					pass
 				else:
 					# Save it for next time... not expired yet:
-					this_frame_entity_list.append( entity )
+					this_frame_entity_list.append(entity)
 			
 			# For next frame:
 			last_frame_entity_list = this_frame_entity_list
@@ -462,49 +442,49 @@ class Target:
 			for entity in this_frame_entity_list:
 				center_point = entity[3]
 				c = entity[1]  # RGB color tuple
-				cv.Circle(display_image, center_point, 20, cv.CV_RGB(c[0], c[1], c[2]), 1)
-				cv.Circle(display_image, center_point, 15, cv.CV_RGB(c[0], c[1], c[2]), 1)
-				cv.Circle(display_image, center_point, 10, cv.CV_RGB(c[0], c[1], c[2]), 2)
-				cv.Circle(display_image, center_point,  5, cv.CV_RGB(c[0], c[1], c[2]), 3)
+				cv2.circle(display_image, center_point, 20, (c[0], c[1], c[2]), 1)
+				cv2.circle(display_image, center_point, 15, (c[0], c[1], c[2]), 1)
+				cv2.circle(display_image, center_point, 10, (c[0], c[1], c[2]), 2)
+				cv2.circle(display_image, center_point,  5, (c[0], c[1], c[2]), 3)
 			
 			
 			#print "min_size is: " + str(min_size)
 			# Listen for ESC or ENTER key
-			c = cv.WaitKey(7) % 0x100
+			c = cv2.waitKey(7) % 0x100
 			if c == 27 or c == 10:
 				break
 			
 			# Toggle which image to show
 			if chr(c) == 'd':
-				image_index = ( image_index + 1 ) % len( image_list )
+				image_index = (image_index + 1) % len(image_list)
 			
-			image_name = image_list[ image_index ]
+			image_name = image_list[image_index]
 			
 			# Display frame to user
 			if image_name == "camera":
 				image = camera_image
-				cv.PutText( image, "Camera (Normal)", text_coord, text_font, text_color )
+				cv2.putText(image, "Camera (Normal)", text_coord, cv2.FONT_HERSHEY_PLAIN, 1.0, text_color)
 			elif image_name == "difference":
 				image = difference
-				cv.PutText( image, "Difference Image", text_coord, text_font, text_color )
+				cv2.putText(image, "Difference Image", text_coord, cv2.FONT_HERSHEY_PLAIN, 1.0, text_color)
 			elif image_name == "display":
 				image = display_image
-				cv.PutText( image, "Targets (w/AABBs and contours)", text_coord, text_font, text_color )
+				cv2.putText(image, "Targets (w/AABBs and contours)", text_coord, cv2.FONT_HERSHEY_PLAIN, 1.0, text_color)
 			elif image_name == "threshold":
 				# Convert the image to color.
-				cv.CvtColor( grey_image, display_image, cv.CV_GRAY2RGB )
+				display_image = cv2.cvtColor(grey_image, cv2.COLOR_GRAY2RGB)
 				image = display_image  # Re-use display image here
-				cv.PutText( image, "Motion Mask", text_coord, text_font, text_color )
+				cv2.putText(image, "Motion Mask", text_coord, cv2.FONT_HERSHEY_PLAIN, 1.0, text_color)
 			elif image_name == "faces":
 				# Do face detection
-				detect_faces( camera_image, haar_cascade, mem_storage )				
+				detect_faces( camera_image, haar_cascade)				
 				image = camera_image  # Re-use camera image here
-				cv.PutText( image, "Face Detection", text_coord, text_font, text_color )
+				cv2.putText(image, "Face Detection", text_coord, cv2.FONT_HERSHEY_PLAIN, 1.0, text_color)
 			
-			cv.ShowImage( "Target", image )
+			cv2.imshow("Target", image)
 			
 			if self.writer: 
-				cv.WriteFrame( self.writer, image );
+				self.writer.write(image)
 			
 			#log_file.flush()
 			
@@ -513,24 +493,33 @@ class Target:
 			# we need this to keep the time-based target clipping correct:
 			frame_t1 = time.time()
 			
-
 			# If reading from a file, put in a forced delay:
 			if not self.writer:
 				delta_t = frame_t1 - frame_t0
-				if delta_t < ( 1.0 / 15.0 ): time.sleep( ( 1.0 / 15.0 ) - delta_t )
+				if delta_t < (1.0 / 15.0): time.sleep( (1.0 / 15.0) - delta_t)
 			
 		t1 = time.time()
 		time_delta = t1 - t0
-		processed_fps = float( frame_count ) / time_delta
-		print "Got %d frames. %.1f s. %f fps." % ( frame_count, time_delta, processed_fps )
+		processed_fps = float(frame_count) / time_delta
+		print "Got %d frames. %.1f s. %f fps." % (frame_count, time_delta, processed_fps)
 		
 if __name__=="__main__":
 	t = Target()
-#	import cProfile
-#	cProfile.run( 't.run()' )
 	t.run()
-
-
-
-
-
+	#===========================================================================
+	# line profile
+	#from line_profiler import LineProfiler
+	# profile = LineProfiler()
+	# profile.add_function(t.run)
+	# profile.run('t.run()')
+	# profile.print_stats()
+	# profile.dump_stats("track.py.lprof")
+	#===========================================================================
+	# cProfile
+	#===========================================================================
+	# import cProfile,pstats
+	# cProfile.run('t.run()', 'track.py.prof')
+	# p = pstats.Stats('track.py.prof')
+	# p.sort_stats('cumulative')
+	# p.print_stats()
+	#===========================================================================
