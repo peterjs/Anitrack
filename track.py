@@ -96,8 +96,8 @@ class Target:
 			is_color = True
 
 			self.capture = cv2.VideoCapture(0)
-			self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-			self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+			self.capture.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 320)
+			self.capture.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 240)
 			ret, frame = self.capture.read()
 			
 			self.writer = None
@@ -217,7 +217,7 @@ class Target:
 			bounding_box_list = []
 
 			# Now calculate movements using the white pixels as "motion" data
-			_, contours, heirs = cv2.findContours(grey_image.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+			contours, heirs = cv2.findContours(grey_image.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 			
 			try:
 				heirs = heirs[0]
